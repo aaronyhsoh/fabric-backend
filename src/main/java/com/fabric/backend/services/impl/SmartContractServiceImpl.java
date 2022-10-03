@@ -1,18 +1,20 @@
-package com.fabric.backend.controllers;
+package com.fabric.backend.services.impl;
 
+import com.fabric.backend.services.SmartContractService;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
-import org.hyperledger.fabric.client.*;
+import org.hyperledger.fabric.client.Contract;
+import org.hyperledger.fabric.client.Gateway;
+import org.hyperledger.fabric.client.GatewayException;
+import org.hyperledger.fabric.client.Network;
 import org.hyperledger.fabric.client.identity.*;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -24,13 +26,11 @@ import java.security.InvalidKeyException;
 import java.security.PrivateKey;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
-import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-@RestController
-@RequestMapping("health")
-public class HealthCheckController {
+@Service
+public class SmartContractServiceImpl implements SmartContractService {
     @Value("${org.msp.id}")
     private String mspID;
     @Value("${peer.endpoint.url}")
@@ -46,19 +46,8 @@ public class HealthCheckController {
 
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-    @GetMapping("/test")
-    public ResponseEntity testHealthCheck() {
-        return ResponseEntity.ok("Server alive");
-    }
-
-    @GetMapping("/smart-contract/{contractName}/user/{user}")
-    @ResponseBody
-    public ResponseEntity evaluateTransaction(@PathVariable String contractName,
-                                              @PathVariable String user,
-                                              @RequestParam String functionName
-    ) throws GatewayException, CommitException, InterruptedException, IOException, InvalidKeyException, CertificateException {
+    public String evaluateTransaction(String channelName, String contractName, String user, String functionName) throws CertificateException, IOException, InterruptedException, GatewayException, InvalidKeyException {
         ManagedChannel channel = newGrpcConnection();
-
         Gateway.Builder builder = Gateway.newInstance().identity(newIdentity(user)).signer(newSigner(user)).connection(channel)
                 // Default timeouts for different gRPC calls
                 .evaluateOptions(options -> options.withDeadlineAfter(5, TimeUnit.SECONDS))
@@ -67,14 +56,14 @@ public class HealthCheckController {
                 .commitStatusOptions(options -> options.withDeadlineAfter(1, TimeUnit.MINUTES));
 
         try (Gateway gateway = builder.connect()) {
-            Network network = gateway.getNetwork("mychannel");
+            Network network = gateway.getNetwork(channelName);
             Contract contract = network.getContract(contractName);
             System.out.println("\n--> Evaluate Transaction: " +  functionName);
 
             byte[] evaluateResult = contract.evaluateTransaction(functionName);
 
             System.out.println("*** Result:" + prettyJson(evaluateResult));
-            return ResponseEntity.ok("*** Result:" + prettyJson(evaluateResult));
+            return prettyJson(evaluateResult);
         } catch(Exception e) {
             throw e;
         } finally {
@@ -119,5 +108,4 @@ public class HealthCheckController {
             return keyFiles.findFirst().orElseThrow(NullPointerException::new);
         }
     }
-
 }
